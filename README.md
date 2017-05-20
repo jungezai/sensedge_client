@@ -32,6 +32,8 @@ Wi-Fi Internet Connection
 
 SMS Receiver Phone Setup
 ------------------------
+0. Config your sensor: (e.g. the sensor's mac address is c4:34:39:d3:1d:6e)
+`mkdir -p ~/ElderSens/config && touch ~/ElderSens/config/DiaperSens-c4\:34\:39\:d3\:1d\:6e.txt`
 1. Open ElderSens config file in command line:
 `nano ~/ElderSens/config/DiaperSens-c4\:34\:39\:d3\:1d\:6e.txt`
 2. Add the SMS receiver phone's carrier and number (with a space in between).
