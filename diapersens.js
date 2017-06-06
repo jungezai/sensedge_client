@@ -20,13 +20,12 @@ var monitorTable = {};
 
 // Read ElderSens config file
 const fs = require('fs');
-const configDir = '/home/pi/ElderSens/config/';
+const configDir = '/home/pi/ElderSens';
 try {
 	var configs = fs.readdirSync(configDir);
 	for (var i = 0; i < configs.length; i++) {
-		if (configs[i].substr(0, 11) == 'DiaperSens-') {
-			var addr = configs[i].substr(11, 17);
-			monitorTable[addr] = [];
+		if (configs[i] == 'DiaperSens.config') {
+			monitorTable['Sim'] = [];
 			var data = fs.readFileSync(configDir + configs[i], 'utf8');
 			var lines = data.split(/\r?\n/);
 			for (var j = 0; j < lines.length; j++) {
@@ -39,7 +38,7 @@ try {
 					var phone = line.substr(6).trim().split(' ');
 					var carrier = phone[0].trim();
 					var number = phone[1].trim();
-					monitorTable[addr].push({ 'carrier': carrier, 'number': number });
+					monitorTable['Sim'].push({ 'carrier': carrier, 'number': number });
 				}
 			}
 		}
@@ -182,8 +181,8 @@ function algo_detection(dev) {
 			dev['temperature'] + ' \u00B0C\n';
 
 		dev['notified'] = true;
-		for (var i in monitorTable[addr]) {
-			var phoneInfo = monitorTable[addr][i];
+		for (var i in monitorTable['Sim']) {
+			var phoneInfo = monitorTable['Sim'][i];
 			SendSMS(phoneInfo, subject, body, function(error) {
 				if (error) {
 					console.log('\t\tSend SMS to ' + this.number +
