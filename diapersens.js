@@ -51,6 +51,7 @@ try {
 const ALGO_COOLDOWN_MS = 60 * 60 * 1000; // 1 hour
 const ALGO_TEMPRAMP_MS = 2 * 60 * 1000; // 2 minutes
 const ALGO_TEMPRAMP_VALUE = 0.5; // 0.5 Celsius
+const ALGO_TEMPRAMP_TIMEOUT = 4 * 60 * 60 * 1000; // 4 hours
 
 var gConfig = { 'bootNotification':
 			{ 'enable': false, 'os': 'linux', 'uptime': 60, 'recipient': phoneBook['Li'] },
@@ -170,7 +171,11 @@ function algo_detection(dev) {
 					     'humidity': dev['humidity']});
 			return;
 		}
-		// Detected
+		if (now.getTime() < new Date(dev['rh_start'].getTime() + ALGO_TEMPRAMP_TIMEOUT).getTime()) {
+			return;
+		}
+
+		// Otherwise we claim it's detected!
 		if (dev['notified'])
 			return;
 
