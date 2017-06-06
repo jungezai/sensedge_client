@@ -19,6 +19,7 @@ PIDFILE=/var/run/${DAEMON_NAME}.pid
 do_start() {
 	log_daemon_msg "Starting system $DAEMON_NAME daemon"
 	sleep 3
+	hciconfig hci0 reset
 	start-stop-daemon --start --background --pidfile $PIDFILE --make-pidfile --user $DAEMON_USER --chuid $DAEMON_USER --chdir ${DIR} --startas /bin/bash -- -c "exec node ./$DAEMON > /var/log/$DAEMON_NAME.log 2>&1"
 	log_end_msg $?
 }

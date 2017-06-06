@@ -33,5 +33,6 @@ fi
 if [ "$1" = "sim" ]; then
 	node -e 'require("./diapersens").simulate()'
 else
+	sudo hciconfig hci0 reset
 	node ./diapersens.js
 fi
