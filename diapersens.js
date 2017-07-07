@@ -56,6 +56,7 @@ const ALGO_TEMPRAMP_TIMEOUT = 4 * 60 * 60 * 1000; // 4 hours
 var gConfig = { 'bootNotification':
 			{ 'enable': false, 'os': 'linux', 'uptime': 60, 'recipient': phoneBook['Li'] },
 		'cloudUpdate': true,
+		'useAlgorithm': false
 };
 var gDevices = {};
 
@@ -142,7 +143,37 @@ function sensorNotification(type, addr, data) {
 	algo_detection(gDevices[addr]);
 }
 
+function send_notification(dev) {
+	// Skip if already notified
+	if (dev['notified'])
+		return;
+
+	// Send notification
+	var addr = dev['peripheral'].address;
+	var subject = addr + ' needs your attention';
+	var body = 'Humidity: ' + dev['humidity'] + ' %\nTemperature: ' +
+		dev['temperature'] + ' \u00B0C\n';
+
+	dev['notified'] = true;
+	for (var i in monitorTable['Sim']) {
+		var phoneInfo = monitorTable['Sim'][i];
+		SendSMS(phoneInfo, subject, body, function(error) {
+			if (error) {
+				console.log('\t\tSend SMS to ' + this.number +
+					' failed: ' + error);
+			} else {
+				console.log('\t\tSend SMS to ' + this.number +
+					' successfully');
+			}
+		}.bind( {number:phoneInfo['number']} ));
+	}
+}
+
 function algo_detection(dev) {
+	if (!gConfig['useAlgorithm']) {
+		send_notification(dev);
+		return;
+	}
 	var now = new Date();
 	if (dev['state'] == 'STATE_INIT') {
 		if (dev['humidity'] >= RH_THRESHOLD) {
@@ -175,32 +206,11 @@ function algo_detection(dev) {
 			return;
 		}
 
-		// Otherwise we claim it's detected!
-		if (dev['notified'])
-			return;
+		send_notification(dev);
 
-		// Send notification
-		var addr = dev['peripheral'].address;
-		var subject = addr + ' needs your attention';
-		var body = 'Humidity: ' + dev['humidity'] + ' %\nTemperature: ' +
-			dev['temperature'] + ' \u00B0C\n';
-
-		dev['notified'] = true;
-		for (var i in monitorTable['Sim']) {
-			var phoneInfo = monitorTable['Sim'][i];
-			SendSMS(phoneInfo, subject, body, function(error) {
-				if (error) {
-					console.log('\t\tSend SMS to ' + this.number +
-						' failed: ' + error);
-				} else {
-					console.log('\t\tSend SMS to ' + this.number +
-						' successfully');
-				}
-			}.bind( {number:phoneInfo['number']} ));
-		}
-		dev['notified'] = false;
 		dev['records'] = [];
 		dev['state'] = 'STATE_INIT';
+		dev['notified'] = false;
 	}
 }
 
