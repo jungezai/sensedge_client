@@ -26,7 +26,7 @@ try {
 	for (var i = 0; i < configs.length; i++) {
 		if (configs[i] == 'DiaperSens.config') {
 			monitorTable['Sim'] = [];
-			var data = fs.readFileSync(configDir + configs[i], 'utf8');
+			var data = fs.readFileSync(configDir + '/' + configs[i], 'utf8');
 			var lines = data.split(/\r?\n/);
 			for (var j = 0; j < lines.length; j++) {
 				var line = lines[j].trim();
