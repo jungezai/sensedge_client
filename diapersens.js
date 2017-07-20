@@ -4,7 +4,7 @@ var nodemailer = require('nodemailer');
 var ip = require('ip');
 var mqsh = require('./mqpubsub.js');
 
-var RH_THRESHOLD = 80
+const RH_THRESHOLD = 80
 
 const u1_carrier = 'AT&T';
 const u1_number = '1234567';
@@ -14,49 +14,31 @@ const u3_carrier = 'T-Mobile';
 const u3_number = '1234567';
 
 const phoneBook = {
+	'Yi':		{ 'carrier': 'T-Mobile', 'number': '4083178351' },
 	'Li':		{ 'carrier': 'Verizon',  'number': '2082720078' },
+	'George':	{ 'carrier': 'Verizon',  'number': '5105661442' },
+	'1':		{ 'carrier': u1_carrier, 'number': u1_number    },
+	'2':		{ 'carrier': u2_carrier, 'number': u2_number    },
+	'3':		{ 'carrier': u3_carrier, 'number': u3_number    },
 };
-var monitorTable = {};
-
-// Read ElderSens config file
-const fs = require('fs');
-const configDir = '/home/pi/ElderSens';
-try {
-	var configs = fs.readdirSync(configDir);
-	for (var i = 0; i < configs.length; i++) {
-		if (configs[i] == 'DiaperSens.config') {
-			monitorTable['Sim'] = [];
-			var data = fs.readFileSync(configDir + '/' + configs[i], 'utf8');
-			var lines = data.split(/\r?\n/);
-			for (var j = 0; j < lines.length; j++) {
-				var line = lines[j].trim();
-				if (line.charAt(0) == '#')
-					continue;
-				if (line.substr(0, 13).toUpperCase() == 'RH THRESHOLD:') {
-					RH_THRESHOLD = parseFloat(line.substr(13).trim());
-				} else if (line.substr(0, 6).toUpperCase() == 'PHONE:') {
-					var phone = line.substr(6).trim().split(' ');
-					var carrier = phone[0].trim();
-					var number = phone[1].trim();
-					monitorTable['Sim'].push({ 'carrier': carrier, 'number': number });
-				}
-			}
-		}
-	}
-} catch (e) {
-	console.log('readdirSync: ' + e);
-}
+const monitorTable = {
+	'c2:45:ad:66:f2:d8' : [ phoneBook['Li'], phoneBook['1'], phoneBook['2'], phoneBook['3'] ],
+	'e5:10:e1:a8:c4:1d' : [ phoneBook['Li'], phoneBook['1'], phoneBook['2'], phoneBook['3'] ],
+	'f2:1c:0d:2b:1d:0c' : [ phoneBook['Li'], phoneBook['1'], phoneBook['2'], phoneBook['3'] ],
+	'c8:54:2b:02:8b:e2' : [ phoneBook['Li'], phoneBook['1'], phoneBook['2'], phoneBook['3'] ],
+	'c4:34:39:d3:1d:6e' : [ phoneBook['Li'], phoneBook['1'], phoneBook['2'], phoneBook['3'] ],
+	'cf:1e:ad:95:5a:1a' : [ phoneBook['Li'], phoneBook['1'], phoneBook['2'], phoneBook['3'] ],
+};
 
 // Detection Algorithm
 const ALGO_COOLDOWN_MS = 60 * 60 * 1000; // 1 hour
 const ALGO_TEMPRAMP_MS = 2 * 60 * 1000; // 2 minutes
 const ALGO_TEMPRAMP_VALUE = 0.5; // 0.5 Celsius
-const ALGO_TEMPRAMP_TIMEOUT = 4 * 60 * 60 * 1000; // 4 hours
 
 var gConfig = { 'bootNotification':
 			{ 'enable': false, 'os': 'linux', 'uptime': 60, 'recipient': phoneBook['Li'] },
 		'cloudUpdate': true,
-		'useAlgorithm': false
+		'useAlgorithm': false,
 };
 var gDevices = {};
 
@@ -74,7 +56,22 @@ function Device(peripheral) {
 	this.records		= [];
 }
 
-function sensorNotification(type, addr, data) {
+function doNotification(dev) {
+	if (gConfig['useAlgorithm']) {
+		algo_detection(dev);
+	} else {
+		if (dev['humidity'] >= RH_THRESHOLD) {
+			if (!dev['notified']) {
+				dev['notified'] = true;
+				sendNotification(dev);
+			}
+		} else {
+			dev['notified'] = false;
+		}
+	}
+}
+
+function processSensorData(type, addr, data) {
 	// Send boot notification on Raspberry Pi
 	var bn = gConfig['bootNotification'];
 	if (bn['enable'] && os.platform() == bn['os'] && os.uptime() < bn['uptime']) {
@@ -91,6 +88,7 @@ function sensorNotification(type, addr, data) {
 				}
 		});
 	}
+	var dev = gDevices[addr];
 	if (type == 'CFX') {
 		// data format: flag (1) temperature (4, IEEE 11073 float LE) timestamp (7) type (1)
 		//console.log('buf ' + data.toString('hex'));
@@ -99,9 +97,9 @@ function sensorNotification(type, addr, data) {
 		var exp = data.readInt8(4);
 		var value = (man * Math.pow(10, exp)).toFixed(2);
 		if (vtype == 0)
-			gDevices[addr]['temperature'] = value;
+			dev['temperature'] = value;
 		else
-			gDevices[addr]['humidity'] = value;
+			dev['humidity'] = value;
 	} else {
 		var len = data.readUInt8(0);
 		var flag = data.readUInt8(1);
@@ -118,8 +116,8 @@ function sensorNotification(type, addr, data) {
 		case 1:
 			var temperature = (data.readInt16BE(2) / 10.0).toFixed(1);
 			var humidity = (data.readInt16BE(4) / 10.0).toFixed(1);
-			gDevices[addr]['temperature'] = temperature;
-			gDevices[addr]['humidity'] = humidity;
+			dev['temperature'] = temperature;
+			dev['humidity'] = humidity;
 			break;
 		case 2:
 			var unused_value = data.readInt8(2);
@@ -127,36 +125,31 @@ function sensorNotification(type, addr, data) {
 		}
 	}
 	if (gConfig['cloudUpdate']) {
-		pushAWS(addr, gDevices[addr]['temperature'], gDevices[addr]['humidity'], function(shadow, error) {
+		pushAWS(addr, dev['temperature'], dev['humidity'], function(shadow, error) {
 		var str = 'cloudUpdate ';
 		if (error)
 			str += 'failed';
 		else
 			str += 'success';
-		console.log('\t' + gDevices[addr]['symbol'], addr + ' RSSI:' + gDevices[addr]['rssi'], 'temperature',
-			    gDevices[addr]['temperature'], 'C humidity', gDevices[addr]['humidity'], '%', str);
+		console.log('\t' + dev['symbol'], addr + ' RSSI:' + dev['rssi'], 'temperature',
+			    dev['temperature'], 'C humidity', dev['humidity'], '%', str);
 		});
 	} else {
-		console.log('\t' + gDevices[addr]['symbol'], addr + ' RSSI:' + gDevices[addr]['rssi'], 'temperature',
-			    gDevices[addr]['temperature'], 'C humidity', gDevices[addr]['humidity'], '%');
+		console.log('\t' + dev['symbol'], addr + ' RSSI:' + dev['rssi'], 'temperature',
+			    dev['temperature'], 'C humidity', dev['humidity'], '%');
 	}
-	algo_detection(gDevices[addr]);
+	doNotification(dev);
 }
 
-function send_notification(dev) {
-	// Skip if already notified
-	if (dev['notified'])
-		return;
-
+function sendNotification(dev) {
 	// Send notification
 	var addr = dev['peripheral'].address;
 	var subject = addr + ' needs your attention';
 	var body = 'Humidity: ' + dev['humidity'] + ' %\nTemperature: ' +
 		dev['temperature'] + ' \u00B0C\n';
 
-	dev['notified'] = true;
-	for (var i in monitorTable['Sim']) {
-		var phoneInfo = monitorTable['Sim'][i];
+	for (var i in monitorTable[addr]) {
+		var phoneInfo = monitorTable[addr][i];
 		SendSMS(phoneInfo, subject, body, function(error) {
 			if (error) {
 				console.log('\t\tSend SMS to ' + this.number +
@@ -170,10 +163,6 @@ function send_notification(dev) {
 }
 
 function algo_detection(dev) {
-	if (!gConfig['useAlgorithm']) {
-		send_notification(dev);
-		return;
-	}
 	var now = new Date();
 	if (dev['state'] == 'STATE_INIT') {
 		if (dev['humidity'] >= RH_THRESHOLD) {
@@ -202,15 +191,16 @@ function algo_detection(dev) {
 					     'humidity': dev['humidity']});
 			return;
 		}
-		if (now.getTime() < new Date(dev['rh_start'].getTime() + ALGO_TEMPRAMP_TIMEOUT).getTime()) {
+		// Detected
+		if (dev['notified'])
 			return;
-		}
 
-		send_notification(dev);
+		// Send notification
+		sendNotification(dev);
 
-		dev['records'] = [];
 		dev['state'] = 'STATE_INIT';
 		dev['notified'] = false;
+		dev['records'] = [];
 	}
 }
 
@@ -260,14 +250,13 @@ function execCmd(line, callback)
 }
 
 function pushAWS(addr, vt, vh, callback) {
-	var addr = 'Sim';
 	var util = require('util');
 	var spawn = require('child_process').spawn;
 	var execFile = require('child_process').execFile;
 	var mosqparam = [
 		'--cafile', 'certs/rootCA.pem',
-		'--cert', 'certs/keys/certificate.pem',
-		'--key', 'certs/keys/private.key',
+		'--cert', 'certs/' + addr + '/certificate.pem',
+		'--key', 'certs/' + addr + '/private.key',
 		'-h', 'a7dsuf6iddqdg.iot.us-west-2.amazonaws.com',
 		'-p', '8883'
 	];
@@ -279,7 +268,7 @@ function pushAWS(addr, vt, vh, callback) {
 	};
 	console.log(postData);
 	// publish to main data queue (for DynamoDB)
-	execFile('mosquitto_pub', mosqparam.concat('-t', 'temp-humidity/DiaperSens-' + addr, '-m', JSON.stringify(postData)),
+	execFile('mosquitto_pub', mosqparam.concat('-t', 'temp-humidity/Sensor-' + addr, '-m', JSON.stringify(postData)),
 		 function(error, stdout, stderr) {
 			// published
 			callback(false, error);
@@ -294,7 +283,7 @@ function pushAWS(addr, vt, vh, callback) {
 			}
 		}
 	};
-	execFile('mosquitto_pub', mosqparam.concat('-t','$aws/things/DiaperSens-' + addr + '/shadow/update', '-m',
+	execFile('mosquitto_pub', mosqparam.concat('-t','$aws/things/Sensor-' + addr + '/shadow/update', '-m',
 		 JSON.stringify(shadowPayload)), function(error, stdout, stderr) {
 			// shadow update done
 			callback(true, error);
@@ -315,8 +304,8 @@ function simulate() {
 		});
 		simDevice['temperature'] = temp;
 		simDevice['humidity'] = humidity;
-		algo_detection(simDevice);
-	}, 2500);
+		doNotification(simDevice);
+	}, 5000);
 }
 
 noble.on('stateChange', function(state) {
@@ -359,7 +348,7 @@ noble.on('discover', function(peripheral) {
 								gDevices[addr]['symbol'] = 'X';
 								break;
 							}
-							sensorNotification(type, addr, data);
+							processSensorData(type, addr, data);
 						});
 					});
 				});
@@ -400,7 +389,7 @@ function SendEmail(recipient, subject, body, callback) {
 	}, {
 		// default message fields
 		// sender info
-		from: 'ElderSens <chuangfeixin@gmail.com>',
+		from: 'CFX <chuangfeixin@gmail.com>',
 	});
 
 	// Message object
@@ -432,7 +421,6 @@ function SendSMS(phoneInfo, subject, body, cb) {
 		'Verizon': 'vtext.com'};
 	var carrier = phoneInfo['carrier'];
 	var number = phoneInfo['number'];
-	body = body + '\n-ElderSens';
 
 	if (gateways[carrier] == undefined) {
 		cb("invalid carrier " + carrier);
@@ -459,10 +447,10 @@ setInterval(function() {
 			peripheral.updateRssi(function(error, rssi) {
 				if (!error)
 					gDevices[addr]['rssi'] = rssi;
-				noble.startScanning();
 			});
 		}
 	}
+	noble.startScanning();
 }, 1000);
 
 // handle MQTT management

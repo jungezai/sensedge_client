@@ -1,7 +1,7 @@
 const mosqparam = [
 	'--cafile', 'certs/rootCA.pem',
-	'--cert', 'certs/keys/certificate.pem',
-	'--key', 'certs/keys/private.key',
+	'--cert', 'certs/Sim/certificate.pem',
+	'--key', 'certs/Sim/private.key',
 	'-h', 'a7dsuf6iddqdg.iot.us-west-2.amazonaws.com',
 	'-p', '8883'
 ];

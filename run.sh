@@ -17,17 +17,14 @@ if [ "$1" = "install" ]; then
 			sudo apt install mosquitto
 			sudo apt install mosquitto-clients
 			# patch noble with bluez hci workaround
-			rm -rf node_modules/bluetooth-hci-socket
+			cd node_modules
+			rm -rf bluetooth-hci-socket
 			npm install sandeepmistry/node-bluetooth-hci-socket#rework-kernel-workarounds
 			# access BT without root
 			sudo setcap cap_net_raw+eip $(eval readlink -f `which node`)
-			# copy config file
-			mkdir -p ~/ElderSens
-			cp scripts/DiaperSens.config ~/ElderSens/
 			# install diapersense init.d script
 			sudo cp scripts/diapersens /etc/init.d/
 			sudo systemctl enable diapersens
-			sudo systemctl start diapersens
 		fi
 	fi
 	npm install noble nodemailer ip
