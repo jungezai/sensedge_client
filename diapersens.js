@@ -255,8 +255,8 @@ function pushAWS(addr, vt, vh, callback) {
 	var execFile = require('child_process').execFile;
 	var mosqparam = [
 		'--cafile', 'certs/rootCA.pem',
-		'--cert', 'certs/' + addr + '/certificate.pem',
-		'--key', 'certs/' + addr + '/private.key',
+		'--cert', 'certs/keys/certificate.pem',
+		'--key', 'certs/keys/private.key',
 		'-h', 'a7dsuf6iddqdg.iot.us-west-2.amazonaws.com',
 		'-p', '8883'
 	];
