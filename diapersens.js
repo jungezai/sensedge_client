@@ -50,7 +50,7 @@ function Device(peripheral) {
 	this.enabled		= false;
 	this.notified		= false;
 	this.connecting		= false;
-	this.timestamp		= (new Date()).getTime();
+	this.tsconn		= (new Date()).getTime();
 	this.symbol		= 'U';
 	// detection algorithm related
 	this.state		= 'STATE_INIT';
@@ -329,17 +329,18 @@ noble.on('discover', function(peripheral) {
 		var now = (new Date()).getTime();
 
 		// Avoid duplicated connection, parallel connection and if we haven't heard a sensor
-		// for 60s, we will reconnect with it (when adv is heard).
-		if (gDevices[addr] && (now - gDevices[addr]['timestamp'] < 60 * 1000) &&
+		// for 20s, we will reconnect with it (when adv is heard).
+		if (gDevices[addr] && (now - gDevices[addr]['tsconn'] < 20 * 1000) &&
 		    (gDevices[addr]['enabled'] == true || gDevices[addr]['connecting'] == true)) {
 			//console.log("Quit connection: addr ", addr, "enable", gDevices[addr]['enabled'],
-			//	    "connecting", gDevices[addr]['connecting'], "tsdiff", now - gDevices[addr]['timestamp']);
+			//	    "connecting", gDevices[addr]['connecting'], "tsdiff", now - gDevices[addr]['tsconn']);
 			return;
 		}
-		if (!gDevices[addr])
+		//if (!gDevices[addr])
 			gDevices[addr] = new Device(peripheral);
+
 		gDevices[addr]['connecting'] = true;
-		gDevices[addr]['timestamp'] = now;
+		gDevices[addr]['tsconn'] = now;
 
 		// start connection
 		peripheral.connect(function(error) {
@@ -355,7 +356,7 @@ noble.on('discover', function(peripheral) {
 						console.log('Temperature Measurement Notification On');
 						gDevices[addr]['enabled'] = true;
 						gDevices[addr]['connecting'] = false;
-						gDevices[addr]['timestamp'] = now;
+						gDevices[addr]['tsconn'] = now;
 					});
 					// subscribe indicate
 					temperatureMeasurementCharacteristic.subscribe(function(error) {
@@ -472,8 +473,12 @@ setInterval(function() {
 			peripheral.updateRssi(function(error, rssi) {
 				if (!error) {
 					gDevices[addr]['rssi'] = rssi;
-					gDevices[addr]['timestamp'] = (new Date).getTime();
 				}
+			});
+		// if the connecting state stuck for 25s
+		} else if (gDevices[addr]['connecting'] && ((new Date()).getTime() - gDevices[addr]['tsconn'] > 25 * 1000)) {
+			gDevices[addr]['peripheral'].disconnect(function() {
+				console.log("disconnect", addr, "after no activity for 25s");
 			});
 		}
 	}
