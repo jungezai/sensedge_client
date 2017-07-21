@@ -22,6 +22,7 @@ if [ "$1" = "install" ]; then
 			npm install sandeepmistry/node-bluetooth-hci-socket#rework-kernel-workarounds
 			# access BT without root
 			sudo setcap cap_net_raw+eip $(eval readlink -f `which node`)
+			sudo setcap cap_net_raw,cap_net_admin+eip $(eval readlink -f `which hciconfig`)
 			# install diapersense init.d script
 			sudo cp scripts/diapersens /etc/init.d/
 			sudo systemctl enable diapersens

@@ -41,6 +41,8 @@ var gConfig = { 'bootNotification':
 		'useAlgorithm': false,
 };
 var gDevices = {};
+var gResetting = false;
+var gState;
 
 function Device(peripheral) {
 	this.peripheral		= peripheral;
@@ -256,6 +258,24 @@ function execCmd(line, callback)
 	}
 }
 
+function bleScan()
+{
+	if (gState === 'poweredOn' && !gResetting)
+		noble.startScanning();
+}
+
+function hciReset()
+{
+	var exec = require('child_process').exec;
+
+	gResetting = true;
+	exec('hciconfig hci0 reset', function callback(error, stdout, stderr){
+		// result
+		//console.log("hci0 reset", error ? "fail" : "success");
+		gResetting = false;
+	});
+}
+
 function pushAWS(addr, vt, vh, callback) {
 	var util = require('util');
 	var spawn = require('child_process').spawn;
@@ -316,6 +336,7 @@ function simulate() {
 }
 
 noble.on('stateChange', function(state) {
+	gState = state;
 	if (state === 'poweredOn') {
 		noble.startScanning();
 	} else {
@@ -334,11 +355,11 @@ noble.on('discover', function(peripheral) {
 		    (gDevices[addr]['enabled'] == true || gDevices[addr]['connecting'] == true)) {
 			//console.log("Quit connection: addr ", addr, "enable", gDevices[addr]['enabled'],
 			//	    "connecting", gDevices[addr]['connecting'], "tsdiff", now - gDevices[addr]['tsconn']);
+			hciReset();
 			return;
 		}
-		//if (!gDevices[addr])
+		if (!gDevices[addr])
 			gDevices[addr] = new Device(peripheral);
-
 		gDevices[addr]['connecting'] = true;
 		gDevices[addr]['tsconn'] = now;
 
@@ -382,12 +403,12 @@ noble.on('discover', function(peripheral) {
 			peripheral.once('disconnect', function() {
 				var address = peripheral.address;
 				if (gDevices[address] == undefined)
-					noble.startScanning();
+					bleScan();
 				else if (gDevices[address]['enabled']) {
 					console.log(address + ' (RSSI: ' + gDevices[address]['rssi'] + ') disconnected on ' + new Date());
 					gDevices[address]['enabled'] = false;
 					gDevices[address]['connecting'] = false;
-					noble.startScanning();
+					bleScan();
 				}
 			});
 		});
@@ -475,14 +496,14 @@ setInterval(function() {
 					gDevices[addr]['rssi'] = rssi;
 				}
 			});
-		// if the connecting state stuck for 25s
-		} else if (gDevices[addr]['connecting'] && ((new Date()).getTime() - gDevices[addr]['tsconn'] > 25 * 1000)) {
+		// if the connecting state stuck for 30s
+		} else if (gDevices[addr]['connecting'] && ((new Date()).getTime() - gDevices[addr]['tsconn'] > 30 * 1000)) {
 			gDevices[addr]['peripheral'].disconnect(function() {
-				console.log("disconnect", addr, "after no activity for 25s");
+				//console.log("disconnect", addr, "after no activity for 30s");
 			});
 		}
 	}
-	noble.startScanning();
+	bleScan();
 }, 1000);
 
 // handle MQTT management
