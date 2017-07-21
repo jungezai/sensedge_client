@@ -323,6 +323,16 @@ noble.on('stateChange', function(state) {
 
 noble.on('discover', function(peripheral) {
 	if (peripheral.advertisement.localName == "CFX_DIAPER" || peripheral.advertisement.localName == "XuXuKou") {
+		var addr = peripheral.address;
+
+		// avoid duplicated connection
+		if (gDevices[addr] && gDevices[addr]['connecting'] == true) {
+			return;
+		}
+		if (!gDevices[addr])
+			gDevices[addr] = new Device(peripheral);
+		gDevices[addr]['connecting'] = true;
+
 		// start connection
 		peripheral.connect(function(error) {
 			console.log('Connected to ' + peripheral.address + ' (RSSI ' + peripheral.rssi + ') on ' + new Date());
@@ -331,12 +341,11 @@ noble.on('discover', function(peripheral) {
 				console.log("Discovered Health Thermometer GATT Service");
 				deviceInformationService.discoverCharacteristics(['2a1c', '6e400003b5a3f393e0a9e50e24dcca9e'], function(error, characteristics) {
 					var temperatureMeasurementCharacteristic = characteristics[0];
-					var addr = peripheral.address;
 					console.log('Discovered Temperature Measurement Service');
-					gDevices[addr] = new Device(peripheral);
 					// enable notify
 					temperatureMeasurementCharacteristic.notify(true, function(error) {
 						console.log('Temperature Measurement Notification On');
+						gDevices[addr]['connecting'] = false;
 					});
 					// subscribe indicate
 					temperatureMeasurementCharacteristic.subscribe(function(error) {
