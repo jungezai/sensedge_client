@@ -47,8 +47,10 @@ function Device(peripheral) {
 	this.temperature	= 0;
 	this.humidity		= 0;
 	this.rssi		= peripheral.rssi;
-	this.enabled		= true;
+	this.enabled		= false;
 	this.notified		= false;
+	this.connecting		= false;
+	this.timestamp		= (new Date()).getTime();
 	this.symbol		= 'U';
 	// detection algorithm related
 	this.state		= 'STATE_INIT';
@@ -271,7 +273,7 @@ function pushAWS(addr, vt, vh, callback) {
 		temperature: parseFloat(vt),
 		humidity: parseFloat(vh)
 	};
-	console.log(postData);
+	console.log("pushAWS", postData);
 	// publish to main data queue (for DynamoDB)
 	execFile('mosquitto_pub', mosqparam.concat('-t', 'temp-humidity/Sensor-' + addr, '-m', JSON.stringify(postData)),
 		 function(error, stdout, stderr) {
@@ -324,14 +326,20 @@ noble.on('stateChange', function(state) {
 noble.on('discover', function(peripheral) {
 	if (peripheral.advertisement.localName == "CFX_DIAPER" || peripheral.advertisement.localName == "XuXuKou") {
 		var addr = peripheral.address;
+		var now = (new Date()).getTime();
 
-		// avoid duplicated connection
-		if (gDevices[addr] && gDevices[addr]['connecting'] == true) {
+		// Avoid duplicated connection, parallel connection and if we haven't heard a sensor
+		// for 60s, we will reconnect with it (when adv is heard).
+		if (gDevices[addr] && (now - gDevices[addr]['timestamp'] < 60 * 1000) &&
+		    (gDevices[addr]['enabled'] == true || gDevices[addr]['connecting'] == true)) {
+			//console.log("Quit connection: addr ", addr, "enable", gDevices[addr]['enabled'],
+			//	    "connecting", gDevices[addr]['connecting'], "tsdiff", now - gDevices[addr]['timestamp']);
 			return;
 		}
 		if (!gDevices[addr])
 			gDevices[addr] = new Device(peripheral);
 		gDevices[addr]['connecting'] = true;
+		gDevices[addr]['timestamp'] = now;
 
 		// start connection
 		peripheral.connect(function(error) {
@@ -345,7 +353,9 @@ noble.on('discover', function(peripheral) {
 					// enable notify
 					temperatureMeasurementCharacteristic.notify(true, function(error) {
 						console.log('Temperature Measurement Notification On');
+						gDevices[addr]['enabled'] = true;
 						gDevices[addr]['connecting'] = false;
+						gDevices[addr]['timestamp'] = now;
 					});
 					// subscribe indicate
 					temperatureMeasurementCharacteristic.subscribe(function(error) {
@@ -375,6 +385,7 @@ noble.on('discover', function(peripheral) {
 				else if (gDevices[address]['enabled']) {
 					console.log(address + ' (RSSI: ' + gDevices[address]['rssi'] + ') disconnected on ' + new Date());
 					gDevices[address]['enabled'] = false;
+					gDevices[address]['connecting'] = false;
 					noble.startScanning();
 				}
 			});
@@ -459,8 +470,10 @@ setInterval(function() {
 		if (gDevices[addr]['enabled']) {
 			var peripheral = gDevices[addr]['peripheral'];
 			peripheral.updateRssi(function(error, rssi) {
-				if (!error)
+				if (!error) {
 					gDevices[addr]['rssi'] = rssi;
+					gDevices[addr]['timestamp'] = (new Date).getTime();
+				}
 			});
 		}
 	}
