@@ -131,6 +131,11 @@ function processSensorData(type, addr, data) {
 			str += 'failed';
 		else
 			str += 'success';
+
+		// Ignore shadow result
+		if (shadow)
+			return;
+
 		console.log('\t' + dev['symbol'], addr + ' RSSI:' + dev['rssi'], 'temperature',
 			    dev['temperature'], 'C humidity', dev['humidity'], '%', str);
 		});
