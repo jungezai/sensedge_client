@@ -3,6 +3,7 @@ var noble = require('noble');
 var nodemailer = require('nodemailer');
 var ip = require('ip');
 var mqsh = require('./mqpubsub.js');
+var mysql = require('mysql');
 
 const RH_THRESHOLD = 80
 
@@ -35,10 +36,18 @@ const ALGO_COOLDOWN_MS = 60 * 60 * 1000; // 1 hour
 const ALGO_TEMPRAMP_MS = 2 * 60 * 1000; // 2 minutes
 const ALGO_TEMPRAMP_VALUE = 0.5; // 0.5 Celsius
 
-var gConfig = { 'bootNotification':
-			{ 'enable': false, 'os': 'linux', 'uptime': 60, 'recipient': phoneBook['Li'] },
-		'cloudUpdate': true,
+var gConfig = { 'bootNotification': {
+			'enable': false,
+			'os': 'linux',
+			'uptime': 60,
+			'recipient': phoneBook['Li']
+		},
+		'smsNotification': false,
+		'cloudUpdate': false,
 		'useAlgorithm': false,
+		'localDBUpdate': true,
+		'dbHost': 'kittycat9.local',
+		'dbPasswd': 'ElderSens123',
 };
 var gDevices = {};
 var gResetting = false;
@@ -128,25 +137,31 @@ function processSensorData(type, addr, data) {
 			return;
 		}
 	}
+	var logstr = ''
 	if (gConfig['cloudUpdate']) {
-		pushAWS(addr, dev['temperature'], dev['humidity'], function(shadow, error) {
-		var str = 'cloudUpdate ';
-		if (error)
-			str += 'failed';
-		else
-			str += 'success';
+		pushAWS(addr, dev['temperature'], dev['humidity'], function(shadow, err) {
+			logstr = ' cloudUpdate ';
+			if (err)
+				logstr += 'failed';
+			else
+				logstr += 'success';
 
-		// Ignore shadow result
-		if (shadow)
-			return;
-
-		console.log('\t' + dev['symbol'], addr + ' RSSI:' + dev['rssi'], 'temperature',
-			    dev['temperature'], 'C humidity', dev['humidity'], '%', str);
+			// Ignore shadow result
+			if (shadow)
+				return;
 		});
-	} else {
-		console.log('\t' + dev['symbol'], addr + ' RSSI:' + dev['rssi'], 'temperature',
-			    dev['temperature'], 'C humidity', dev['humidity'], '%');
 	}
+	if (gConfig['localDBUpdate']) {
+		pushLocalDB(addr, dev['temperature'], dev['humidity'], function(err) {
+			logstr = ' localDBUpdate';
+			if (err)
+				logstr += 'failed';
+			else
+				logstr += 'success';
+		});
+	}
+	console.log('\t' + dev['symbol'], addr + ' RSSI:' + dev['rssi'], 'temperature',
+		    dev['temperature'], 'C humidity', dev['humidity'], '%' + logstr);
 	doNotification(dev);
 }
 
@@ -157,12 +172,15 @@ function sendNotification(dev) {
 	var body = 'Humidity: ' + dev['humidity'] + ' %\nTemperature: ' +
 		dev['temperature'] + ' \u00B0C\n';
 
+	if (!gConfig['smsNotification'])
+		return;
+
 	for (var i in monitorTable[addr]) {
 		var phoneInfo = monitorTable[addr][i];
-		SendSMS(phoneInfo, subject, body, function(error) {
-			if (error) {
+		SendSMS(phoneInfo, subject, body, function(err) {
+			if (err) {
 				console.log('\t\tSend SMS to ' + this.number +
-					' failed: ' + error);
+					' failed: ' + err);
 			} else {
 				console.log('\t\tSend SMS to ' + this.number +
 					' successfully');
@@ -243,13 +261,13 @@ function execCmd(line, callback)
 		if (args != '') {
 			arglist = args.split(' ');
 		}
-		execFile(cmd, arglist, function(error, stdout, stderr) {
+		execFile(cmd, arglist, function(err, stdout, stderr) {
 			var output;
-			if (error) {
-				callback(error, stderr);
-				output = error + stderr;
+			if (err) {
+				callback(err, stderr);
+				output = err + stderr;
 			} else {
-				callback(error, stdout);
+				callback(err, stdout);
 				output = stdout;
 			}
 			mqsh.output_pub(os.hostname(), output, function(){});
@@ -269,9 +287,9 @@ function hciReset()
 	var exec = require('child_process').exec;
 
 	gResetting = true;
-	exec('hciconfig hci0 reset', function callback(error, stdout, stderr){
+	exec('hciconfig hci0 reset', function callback(err, stdout, stderr){
 		// result
-		//console.log("hci0 reset", error ? "fail" : "success");
+		//console.log("hci0 reset", err ? "fail" : "success");
 		gResetting = false;
 	});
 }
@@ -296,9 +314,9 @@ function pushAWS(addr, vt, vh, callback) {
 	console.log("pushAWS", postData);
 	// publish to main data queue (for DynamoDB)
 	execFile('mosquitto_pub', mosqparam.concat('-t', 'temp-humidity/Sensor-' + addr, '-m', JSON.stringify(postData)),
-		 function(error, stdout, stderr) {
+		 function(err, stdout, stderr) {
 			// published
-			callback(false, error);
+			callback(false, err);
 	});
 	// publish to device shadow
 	var shadowPayload = {
@@ -311,9 +329,24 @@ function pushAWS(addr, vt, vh, callback) {
 		}
 	};
 	execFile('mosquitto_pub', mosqparam.concat('-t','$aws/things/Sensor-' + addr + '/shadow/update', '-m',
-		 JSON.stringify(shadowPayload)), function(error, stdout, stderr) {
+		 JSON.stringify(shadowPayload)), function(err, stdout, stderr) {
 			// shadow update done
-			callback(true, error);
+			callback(true, err);
+	});
+}
+
+function pushLocalDB(addr, vt, vh, callback) {
+	var con = mysql.createConnection({
+		host: gConfig['dbHost'],
+		user: "eldersens",
+		password: gConfig['dbPasswd'],
+		database: "dsdb"
+	});
+	var sql = `insert into diapersens_tbl(ts, addr, temp, humidity) values(now(), '${addr}', ${vt}, ${vh})`;
+	console.log("pushLocalDB:", sql);
+	con.query(sql, function(err, result) {
+		callback(err);
+		con.end();
 	});
 }
 
@@ -325,10 +358,18 @@ function simulate() {
 	setInterval(function() {
 		var temp = (Math.random() * (40 - 25) + 25).toFixed(2);
 		var humidity = (Math.random() * (100 - 30) + 30).toFixed(2);
-		pushAWS(addr, temp, humidity, function(shadow, error) {
-			if (error)
-				console.log("AWS push error,", error, "shadow:", shadow);
-		});
+		if (gConfig['cloudUpdate']) {
+			pushAWS(addr, temp, humidity, function(shadow, err) {
+				if (err)
+					console.log("AWS push error,", err, "shadow:", shadow);
+			});
+		}
+		if (gConfig['localDBUpdate']) {
+			pushLocalDB(addr, temp, humidity, function(err) {
+				if (err)
+					console.log("MySQL push error,", err);
+			});
+		}
 		simDevice['temperature'] = temp;
 		simDevice['humidity'] = humidity;
 		doNotification(simDevice);
@@ -364,23 +405,23 @@ noble.on('discover', function(peripheral) {
 		gDevices[addr]['tsconn'] = now;
 
 		// start connection
-		peripheral.connect(function(error) {
+		peripheral.connect(function(err) {
 			console.log('Connected to ' + peripheral.address + ' (RSSI ' + peripheral.rssi + ') on ' + new Date());
-			peripheral.discoverServices(['1809', '6e400001b5a3f393e0a9e50e24dcca9e'], function(error, services) {
+			peripheral.discoverServices(['1809', '6e400001b5a3f393e0a9e50e24dcca9e'], function(err, services) {
 				var deviceInformationService = services[0];
 				console.log("Discovered Health Thermometer GATT Service");
-				deviceInformationService.discoverCharacteristics(['2a1c', '6e400003b5a3f393e0a9e50e24dcca9e'], function(error, characteristics) {
+				deviceInformationService.discoverCharacteristics(['2a1c', '6e400003b5a3f393e0a9e50e24dcca9e'], function(err, characteristics) {
 					var temperatureMeasurementCharacteristic = characteristics[0];
 					console.log('Discovered Temperature Measurement Service');
 					// enable notify
-					temperatureMeasurementCharacteristic.notify(true, function(error) {
+					temperatureMeasurementCharacteristic.notify(true, function(err) {
 						console.log('Temperature Measurement Notification On');
 						gDevices[addr]['enabled'] = true;
 						gDevices[addr]['connecting'] = false;
 						gDevices[addr]['tsconn'] = now;
 					});
 					// subscribe indicate
-					temperatureMeasurementCharacteristic.subscribe(function(error) {
+					temperatureMeasurementCharacteristic.subscribe(function(err) {
 						temperatureMeasurementCharacteristic.on('data', function(data, isNotification) {
 							var type;
 							switch (temperatureMeasurementCharacteristic.uuid) {
@@ -447,10 +488,10 @@ function SendEmail(recipient, subject, body, callback) {
 		html: "<b>" + body + "</b>"
 	}
 
-	transporter.sendMail(message, (error, info) => {
-		if (error) {
-			console.log(error);
-			callback(error);
+	transporter.sendMail(message, (err, info) => {
+		if (err) {
+			console.log(err);
+			callback(err);
 			return;
 		} else {
 			callback(null);
@@ -491,8 +532,8 @@ setInterval(function() {
 	for (addr in gDevices) {
 		if (gDevices[addr]['enabled']) {
 			var peripheral = gDevices[addr]['peripheral'];
-			peripheral.updateRssi(function(error, rssi) {
-				if (!error) {
+			peripheral.updateRssi(function(err, rssi) {
+				if (!err) {
 					gDevices[addr]['rssi'] = rssi;
 				}
 			});
@@ -509,9 +550,9 @@ setInterval(function() {
 // handle MQTT management
 mqsh.input_sub(os.hostname(), function(sub) {
 	sub.stdout.on('data', (data) => {
-		execCmd(data.toString(), function(error, output) {
-			//if (error)
-			//	console.log(error);
+		execCmd(data.toString(), function(err, output) {
+			//if (err)
+			//	console.log(err);
 			//console.log(output);
 		});
 	});
