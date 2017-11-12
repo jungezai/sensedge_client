@@ -43,9 +43,9 @@ var gConfig = { 'bootNotification': {
 			'recipient': phoneBook['Li']
 		},
 		'smsNotification': false,
-		'cloudUpdate': false,
+		'cloudUpdate': true,
 		'useAlgorithm': false,
-		'localDBUpdate': true,
+		'localDBUpdate': false,
 		'dbHost': 'kittycat9.local',
 		'dbPasswd': 'ElderSens123',
 };
