@@ -8,10 +8,10 @@
 # Short-Description:	DiaperSens
 ### END INIT INFO
 
-DIR=/home/pi/src/git/eldersens/diapersens
+DIR=/home/pi/src/git/eldersens/sensedge
 DAEMON_USER=root
-DAEMON=diapersens.js
-DAEMON_NAME=diapersens
+DAEMON=sensedge.js
+DAEMON_NAME=sensedge
 PIDFILE=/var/run/${DAEMON_NAME}.pid
 
 . /lib/lsb/init-functions

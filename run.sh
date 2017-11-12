@@ -23,19 +23,19 @@ if [ "$1" = "install" ]; then
 			# access BT without root
 			sudo setcap cap_net_raw+eip $(eval readlink -f `which node`)
 			sudo setcap cap_net_raw,cap_net_admin+eip $(eval readlink -f `which hciconfig`)
-			# install diapersense init.d script
-			sudo cp scripts/diapersens /etc/init.d/
-			sudo systemctl enable diapersens
+			# install sensedge init.d script
+			sudo cp scripts/sensedge /etc/init.d/
+			sudo systemctl enable sensedge
 		fi
 	fi
 	npm install noble nodemailer ip
 	exit 0
 fi
 if [ "$1" = "sim" ]; then
-	node -e 'require("./diapersens").simulate()'
+	node -e 'require("./sensedge").simulate()'
 else
 	if [ $(uname -s) = "Linux" ]; then
 		sudo hciconfig hci0 reset
 	fi
-	node ./diapersens.js
+	node ./sensedge.js
 fi
