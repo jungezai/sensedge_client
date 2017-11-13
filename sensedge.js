@@ -62,6 +62,7 @@ var gDevices = {};
 var gResetting = false;
 var gState;
 var gCalibrate = false;
+var gCalibrateDevice = null;
 
 // FallSens device Calibration Table
 const calibrationTable = {
@@ -528,8 +529,11 @@ function simulate() {
 
 
 // Program starts here
-if ((process.argv.length > 2) && (process.argv[2].toLowerCase() == 'calibrate'))
+if ((process.argv.length > 2) && (process.argv[2].toLowerCase() == 'calibrate')) {
 	gCalibrate = true;
+	if (process.argv[3])
+		gCalibrateDevice = process.argv[3].toLowerCase();
+}
 
 noble.on('stateChange', function(state) {
 	gState = state;
@@ -541,9 +545,18 @@ noble.on('stateChange', function(state) {
 });
 
 noble.on('discover', function(peripheral) {
-	if (peripheral.advertisement.localName == "CFX_FALLSENS" || peripheral.advertisement.localName == "XuXuKou") {
+	if (peripheral.advertisement.localName == "CFX_FALLSENS" ||
+	    (peripheral.advertisement.localName == "XuXuKou" && !gCalibrate)) {
 		var addr = peripheral.address;
 		var now = (new Date()).getTime();
+
+		// Use the first found device if calibrate device is unspecified
+		if (gCalibrate && !gCalibrateDevice)
+			gCalibrateDevice = addr;
+
+		// Only allow one device per calibration
+		if (addr != gCalibrateDevice)
+			return;
 
 		// Avoid duplicated connection, parallel connection and if we haven't heard a sensor
 		// for 20s, we will reconnect with it (when adv is heard).

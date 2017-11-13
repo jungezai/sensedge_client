@@ -44,7 +44,7 @@ else
 		sudo hciconfig hci0 reset
 	fi
 	if [ "$1" = "calibrate" ]; then
-		node ./sensedge.js calibrate
+		node ./sensedge.js calibrate $2
 	else
 		node ./sensedge.js
 	fi

@@ -25,8 +25,11 @@ https://developer.apple.com/xcode/downloads/
 `./run.sh install`
 
 ###FallSens Calibration
-`./run.sh calibration`
-When it's finished, append the generated line to calibrationTable in sensedge.js.
+`./run.sh calibration [<MAC address>]`
+If no MAC address is provided, the first found FallSens device will be used for calibration.
+When it's finished, append the generated line to calibrationTable in sensedge.js. For example:
+
+`'e6:d7:22:59:ed:ed' : [ -0.0018,  0.0122,  0.0566,  24.5 ],`
 
 ###Run
 `./run.sh`
