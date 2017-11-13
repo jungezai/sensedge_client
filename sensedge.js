@@ -65,10 +65,10 @@ var gCalibrate = false;
 
 // FallSens device Calibration Table
 const calibrationTable = {
-	// Mac Address,	    Axis X,	  Y,	   Z
-	'e6:d7:22:59:ed:ed' : [  3.0097,  0.3852,  2.0977 ],
-	'd7:9a:ae:73:3b:94' : [  6.5987,  3.8231,  1.1636 ],
-	'fc:a1:c8:c2:b4:af' : [  18.6608, 3.4489,  2.8866 ],
+	// Mac Address,	    Axis X,	  Y,	   Z	    SVM Threshold
+	'e6:d7:22:59:ed:ed' : [  3.0097,  0.3852,  2.0977,  15.5 ],
+	'd7:9a:ae:73:3b:94' : [  6.5987,  3.8231,  1.1636,  24.5 ],
+	'fc:a1:c8:c2:b4:af' : [  18.6608, 3.4489,  2.8866,  29.5 ],
 };
 
 // Function libraries
@@ -224,7 +224,8 @@ function processFallSens(addr, dev, data) {
 			console.log("'" + addr + "' : [",
 				    (0 - dev['calib_axis'][0] / dev['nsample']).toFixed(4) + ", ",
 				    (GRAVITY - dev['calib_axis'][1] / dev['nsample']).toFixed(4) + ", ",
-				    (0 - dev['calib_axis'][2] / dev['nsample']).toFixed(4), "],");
+				    (0 - dev['calib_axis'][2] / dev['nsample']).toFixed(4) + ", ",
+				    FALL_THRESHOLD, "],");
 			disconnect(function() {
 				process.exit(0);
 			});
@@ -238,9 +239,13 @@ function processFallSens(addr, dev, data) {
 				 Math.pow(entry['axis'][1], 2) +
 				 Math.pow(entry['axis'][2], 2));
 	//console.log('\t', addr + ' RSSI:' + dev['rssi'], 'FallSens', entry);
+	var fallThreshold = FALL_THRESHOLD;
+	if (calibrationTable[addr]) {
+		fallThreshold = calibrationTable[addr][3];
+	}
 	if (dev['acc_triggered']) {
 		dev['acc_buffer'].push(entry);
-	} else if (entry['svm'] >= FALL_THRESHOLD) {
+	} else if (entry['svm'] >= fallThreshold) {
 		dev['acc_triggered'] = true;
 		dev['acc_buffer'] = [ entry ];
 	}
