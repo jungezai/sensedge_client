@@ -550,13 +550,15 @@ noble.on('discover', function(peripheral) {
 		var addr = peripheral.address;
 		var now = (new Date()).getTime();
 
-		// Use the first found device if calibrate device is unspecified
-		if (gCalibrate && !gCalibrateDevice)
-			gCalibrateDevice = addr;
+		if (gCalibrate) {
+			// Use the first found device if calibrate device is unspecified
+			if (!gCalibrateDevice)
+				gCalibrateDevice = addr;
 
-		// Only allow one device per calibration
-		if (addr != gCalibrateDevice)
-			return;
+			// Only allow one device per calibration
+			if (addr != gCalibrateDevice)
+				return;
+		}
 
 		// Avoid duplicated connection, parallel connection and if we haven't heard a sensor
 		// for 20s, we will reconnect with it (when adv is heard).
