@@ -68,8 +68,8 @@ var gCalibrateDevice = null;
 const calibrationTable = {
 	// Mac Address,	    Axis X,	  Y,	   Z	    SVM Threshold
 	'e6:d7:22:59:ed:ed' : [  3.0097,  0.3852,  2.0977,  15.5 ],
-	'd7:9a:ae:73:3b:94' : [  6.5987,  3.8231,  1.1636,  24.5 ],
-	'fc:a1:c8:c2:b4:af' : [  18.6608, 3.4489,  2.8866,  29.5 ],
+	'd7:9a:ae:73:3b:94' : [  6.5987,  3.8231,  1.1636,  20.5 ],
+	'fc:a1:c8:c2:b4:af' : [  18.6608, 3.4489,  2.8866,  24.5 ],
 };
 
 // Function libraries
@@ -576,6 +576,10 @@ noble.on('discover', function(peripheral) {
 
 		// start connection
 		peripheral.connect(function(err) {
+			if (err) {
+				console.log('Connect', addr, err);
+				return;
+			}
 			console.log('Connected to ' + peripheral.address + ' (RSSI ' + peripheral.rssi + ') on ' + new Date());
 			peripheral.discoverServices(['1809', '6e400001b5a3f393e0a9e50e24dcca9e'], function(err, services) {
 				var deviceInformationService = services[0];
