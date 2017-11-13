@@ -20,6 +20,7 @@
   "license": "ISC",
   "homepage": "https://bitbucket.org/eldersens/sensedge#readme",
   "dependencies": {
+    "bluetooth-hci-socket": "github:sandeepmistry/node-bluetooth-hci-socket#rework-kernel-workarounds",
     "ip": "^1.1.5",
     "mysql": "^2.15.0",
     "noble": "^1.8.1",
