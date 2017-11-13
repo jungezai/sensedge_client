@@ -25,12 +25,12 @@ const phoneBook = {
 	'3':		{ 'carrier': u3_carrier, 'number': u3_number    },
 };
 const monitorTable = {
-	'c2:45:ad:66:f2:d8' : [ phoneBook['Li'], phoneBook['1'], phoneBook['2'], phoneBook['3'] ],
-	'e5:10:e1:a8:c4:1d' : [ phoneBook['Li'], phoneBook['1'], phoneBook['2'], phoneBook['3'] ],
-	'f2:1c:0d:2b:1d:0c' : [ phoneBook['Li'], phoneBook['1'], phoneBook['2'], phoneBook['3'] ],
-	'c8:54:2b:02:8b:e2' : [ phoneBook['Li'], phoneBook['1'], phoneBook['2'], phoneBook['3'] ],
-	'c4:34:39:d3:1d:6e' : [ phoneBook['Li'], phoneBook['1'], phoneBook['2'], phoneBook['3'] ],
-	'cf:1e:ad:95:5a:1a' : [ phoneBook['Li'], phoneBook['1'], phoneBook['2'], phoneBook['3'] ],
+	'e6:d7:22:59:ed:ed' : [ phoneBook['Li'], phoneBook['Yi'] ],
+	'fc:a1:c8:c2:b4:af' : [ phoneBook['Li'], phoneBook['Yi'] ],
+	'd7:9a:ae:73:3b:94' : [ phoneBook['Li'], phoneBook['Yi'] ],
+	'fe:2f:47:bd:a0:f9' : [ phoneBook['Li'], phoneBook['Yi'] ],
+	'e4:d9:80:62:26:e6' : [ phoneBook['Li'], phoneBook['Yi'] ],
+	'f7:b7:2a:a1:da:b6' : [ phoneBook['Li'], phoneBook['Yi'] ],
 };
 
 // DiaperSens Constant
