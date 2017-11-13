@@ -68,8 +68,8 @@ var gCalibrateDevice = null;
 const calibrationTable = {
 	// Mac Address,	    Axis X,	  Y,	   Z	    SVM Threshold
 	'e6:d7:22:59:ed:ed' : [  3.0097,  0.3852,  2.0977,  15.5 ],
-	'd7:9a:ae:73:3b:94' : [  6.5987,  3.8231,  1.1636,  20.5 ],
-	'fc:a1:c8:c2:b4:af' : [  18.6608, 3.4489,  2.8866,  24.5 ],
+	'fc:a1:c8:c2:b4:af' : [  18.6608, 3.4489,  2.8866,  20.5 ],
+	'd7:9a:ae:73:3b:94' : [  6.5987,  3.8231,  1.1636,  24.5 ],
 };
 
 // Function libraries
@@ -566,20 +566,28 @@ noble.on('discover', function(peripheral) {
 		    (gDevices[addr]['enabled'] == true || gDevices[addr]['connecting'] == true)) {
 			//console.log("Quit connection: addr ", addr, "enable", gDevices[addr]['enabled'],
 			//	    "connecting", gDevices[addr]['connecting'], "tsdiff", now - gDevices[addr]['tsconn']);
-			hciReset();
+			//hciReset();
 			return;
 		}
 		if (!gDevices[addr])
 			gDevices[addr] = new Device(peripheral);
-		gDevices[addr]['connecting'] = true;
-		gDevices[addr]['tsconn'] = now;
+
+		if (peripheral.advertisement.localName == "XuXuKou") {
+			if (!gDevices[addr]['firstadv'])
+				gDevices[addr]['firstadv'] = now;
+			if (now - gDevices[addr]['firstadv'] < 10 * 1000)
+				return;
+		}
 
 		// start connection
+		gDevices[addr]['connecting'] = true;
+		gDevices[addr]['tsconn'] = now;
 		peripheral.connect(function(err) {
 			if (err) {
 				console.log('Connect', addr, err);
 				return;
 			}
+			gDevices[addr]['firstadv'] = 0;
 			console.log('Connected to ' + peripheral.address + ' (RSSI ' + peripheral.rssi + ') on ' + new Date());
 			peripheral.discoverServices(['1809', '6e400001b5a3f393e0a9e50e24dcca9e'], function(err, services) {
 				var deviceInformationService = services[0];
