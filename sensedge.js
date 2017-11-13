@@ -5,8 +5,10 @@ var ip = require('ip');
 var mqsh = require('./mqpubsub.js');
 var mysql = require('mysql');
 
-const RH_THRESHOLD = 80
-
+// Constant
+const TYPE_DIAPERSENS =	1
+const TYPE_FALLSENS   = 2
+// SMS Phonebook
 const u1_carrier = 'AT&T';
 const u1_number = '1234567';
 const u2_carrier = 'Verizon';
@@ -31,10 +33,17 @@ const monitorTable = {
 	'cf:1e:ad:95:5a:1a' : [ phoneBook['Li'], phoneBook['1'], phoneBook['2'], phoneBook['3'] ],
 };
 
-// Detection Algorithm
+// DiaperSens Constant
+const RH_THRESHOLD = 80
+// DiaperSens Detection Algorithm
 const ALGO_COOLDOWN_MS = 60 * 60 * 1000; // 1 hour
 const ALGO_TEMPRAMP_MS = 2 * 60 * 1000; // 2 minutes
 const ALGO_TEMPRAMP_VALUE = 0.5; // 0.5 Celsius
+
+// FallSens Constant
+const GRAVITY = 9.8;
+const FALL_THRESHOLD = 24.5;
+const CALIBRATE_COUNT = 300;
 
 var gConfig = { 'bootNotification': {
 			'enable': false,
@@ -52,21 +61,38 @@ var gConfig = { 'bootNotification': {
 var gDevices = {};
 var gResetting = false;
 var gState;
+var gCalibrate = false;
 
+// FallSens device Calibration Table
+const calibrationTable = {
+	// Mac Address,	    Axis X,	  Y,	   Z
+	'e6:d7:22:59:ed:ed' : [  3.0097,  0.3852,  2.0977 ],
+	'd7:9a:ae:73:3b:94' : [  6.5987,  3.8231,  1.1636 ],
+	'fc:a1:c8:c2:b4:af' : [  18.6608, 3.4489,  2.8866 ],
+};
+
+// Function libraries
 function Device(peripheral) {
 	this.peripheral		= peripheral;
+	this.type		= 0;
+	// DiaperSens
 	this.temperature	= 0;
 	this.humidity		= 0;
+	// DiaperSens detection algorithm related
+	this.state		= 'STATE_INIT';
+	this.rh_start		= 0;
+	this.records		= [];
+	// FallSens
+	this.acc_triggered	= false;
+	this.acc_buffer		= [];
+	this.nsample		= 0;
+	this.calib_axis		= [ 0, 0, 0 ];
+	// Common
 	this.rssi		= peripheral.rssi;
 	this.enabled		= false;
 	this.notified		= false;
 	this.connecting		= false;
 	this.tsconn		= (new Date()).getTime();
-	this.symbol		= 'U';
-	// detection algorithm related
-	this.state		= 'STATE_INIT';
-	this.rh_start		= 0;
-	this.records		= [];
 }
 
 function doNotification(dev) {
@@ -84,9 +110,41 @@ function doNotification(dev) {
 	}
 }
 
-function processSensorData(type, addr, data) {
-	// Send boot notification on Raspberry Pi
+function detectFall(addr, buf) {
+	var t0 = buf[0]['ts'];
+	console.log("Dump", addr, "samples since", new Date(t0).toLocaleString());
+	var sum = [ 0, 0, 0 ];
+	var count = 0;
+	var fall = false;
+	for (var i = 0; i < buf.length; i++) {
+		var entry = buf[i];
+		console.log("\tTS", entry['ts'] - t0, "SVM", entry['svm'].toFixed(2),
+			    "XYZ {", entry['axis'][0].toFixed(2),
+			    entry['axis'][1].toFixed(2),
+			    entry['axis'][2].toFixed(2), "}");
+		if (entry['ts'] - t0 >= 400) {
+			count++;
+			for (var j = 0; j < 3; j++) {
+				sum[j] += entry['axis'][j];
+			}
+		}
+	}
+	if (count > 0) {
+		if ((Math.abs(sum[0] / count) > 5 || Math.abs(sum[2] / count) > 5) &&
+		    Math.abs(sum[1] / count) < 5) {
+			fall = true;
+		}
+		console.log(addr, ": AvgX", (sum[0] / count).toFixed(2),
+			    ", AvgY", (sum[1] / count).toFixed(2),
+			    ", AvgZ", (sum[2] / count).toFixed(2),
+			    ", count", count, ", fall", fall);
+	}
+	return fall;
+}
+
+function sendBootNotification() {
 	var bn = gConfig['bootNotification'];
+
 	if (bn['enable'] && os.platform() == bn['os'] && os.uptime() < bn['uptime']) {
 		// Notify only once
 		bn['enable'] = false;
@@ -101,44 +159,118 @@ function processSensorData(type, addr, data) {
 				}
 		});
 	}
-	var dev = gDevices[addr];
-	if (type == 'CFX') {
-		// data format: flag (1) temperature (4, IEEE 11073 float LE) timestamp (7) type (1)
-		//console.log('buf ' + data.toString('hex'));
-		var vtype = data.readUInt8(0) & 0x1;
-		var man = data.readIntLE(1, 3);
-		var exp = data.readInt8(4);
-		var value = (man * Math.pow(10, exp)).toFixed(2);
-		if (vtype == 0)
-			dev['temperature'] = value;
-		else
-			dev['humidity'] = value;
-	} else {
-		var len = data.readUInt8(0);
-		var flag = data.readUInt8(1);
-		var checksum = data.readUInt8(len);
-		var cs = 0;
-		for (var i = 0; i < len; i++) {
-			cs ^= data.readUInt8(i);
-		}
-		if (cs != checksum) {
-			console.log('\tInvalid checksum ' + cs + ' for frame ' + data.toString('hex'));
-			return;
-		}
-		switch (flag) {
-		case 1:
-			var temperature = (data.readInt16BE(2) / 10.0).toFixed(1);
-			var humidity = (data.readInt16BE(4) / 10.0).toFixed(1);
-			dev['temperature'] = temperature;
-			dev['humidity'] = humidity;
-			break;
-		case 2:
-			var unused_value = data.readInt8(2);
-			return;
+}
+
+function processDiaperSens(addr, dev, data) {
+	var len = data.readUInt8(0);
+	var flag = data.readUInt8(1);
+	var checksum = data.readUInt8(len);
+	var cs = 0;
+
+	for (var i = 0; i < len; i++) {
+		cs ^= data.readUInt8(i);
+	}
+	if (cs != checksum) {
+		console.log('\tInvalid checksum ' + cs + ' for frame ' + data.toString('hex'));
+		return;
+	}
+	switch (flag) {
+	case 1:
+		var temperature = (data.readInt16BE(2) / 10.0).toFixed(1);
+		var humidity = (data.readInt16BE(4) / 10.0).toFixed(1);
+		dev['temperature'] = temperature;
+		dev['humidity'] = humidity;
+		break;
+	case 2:
+		var unused_value = data.readInt8(2);
+		return;
+	}
+}
+
+function processFallSens(addr, dev, data) {
+	var entry = {};
+	var fallUpdate = false;
+
+	entry['axis'] = [];
+	// data format: flag (1) X Y Z (each 4, IEEE 11073 float LE)
+	//console.log('buf ' + data.toString('hex'));
+	for (var i = 0; i < 3; i++) {
+		var ndata = data.slice(i * 4 + 1, i * 4 + 5);
+		var man = ndata.readIntLE(0, 2);
+		var exp = ndata.readInt8(3);
+		var val = man * Math.pow(10, exp);
+		entry['axis'][i] = val;
+		if (calibrationTable[addr]) {
+			entry['axis'][i] += calibrationTable[addr][i];
 		}
 	}
-	var logstr = ''
-	if (gConfig['cloudUpdate']) {
+	dev['nsample']++;
+	dev['humidity'] = 0;
+	// Update non-fall event to cloud every 30s (600*50ms)
+	if (dev['nsample'] % 600 == 0) {
+		fallUpdate = true;
+	}
+	// Calibration Path
+	if (gCalibrate) {
+		for (var i = 0; i < 3; i++) {
+			dev['calib_axis'][i] += entry['axis'][i];
+		}
+		console.log('FallSens', addr, 'calibrating', dev['nsample'],
+			    ': X =', (0 - dev['calib_axis'][0] / dev['nsample']).toFixed(4),
+			    ', Y =', (GRAVITY - dev['calib_axis'][1] / dev['nsample']).toFixed(4),
+			    ', Z =', (0 - dev['calib_axis'][2] / dev['nsample']).toFixed(4));
+		if (dev['nsample'] == CALIBRATE_COUNT) {
+			console.log('Calibration Finished');
+			disconnect(function() {
+				process.exit(0);
+			});
+		}
+		return true;
+	}
+	// Fall Detection Path
+	var now = new Date().getTime();
+	entry['ts'] = now;
+	entry['svm'] = Math.sqrt(Math.pow(entry['axis'][0], 2) +
+				 Math.pow(entry['axis'][1], 2) +
+				 Math.pow(entry['axis'][2], 2));
+	//console.log('\t', addr + ' RSSI:' + dev['rssi'], 'FallSens', entry);
+	if (dev['acc_triggered']) {
+		dev['acc_buffer'].push(entry);
+	} else if (entry['svm'] >= FALL_THRESHOLD) {
+		dev['acc_triggered'] = true;
+		dev['acc_buffer'] = [ entry ];
+	}
+	if (dev['acc_triggered'] && (now - dev['acc_buffer'][0]['ts'] > 500)) {
+		dev['acc_triggered'] = false;
+		if (detectFall(addr, dev['acc_buffer'])) {
+			dev['humidity'] = 100;
+			dev['nsample'] = 0;
+			fallUpdate = true;
+		}
+	}
+
+	return fallUpdate;
+}
+
+function processSensorData(addr, data) {
+	var dev = gDevices[addr];
+	var sensorUpdate = false;
+	var logstr = '';
+	var sensorMsg = '';
+
+	// Send boot notification on Raspberry Pi
+	sendBootNotification();
+
+	if (dev['type'] == TYPE_DIAPERSENS) {
+		processDiaperSens(addr, dev, data);
+		sensorUpdate = true;
+		sensorMsg = 'temperature ' + dev['temperature'] + ' C humidity' + dev['humidity'] + ' %';
+	} else if (dev['type'] == TYPE_FALLSENS) {
+		sensorUpdate = processFallSens(addr, dev, data);
+		sensorMsg = ', Fall detected: ' + (dev['humidity'] == 0 ? "No" : "Yes");
+	}
+
+	if (gConfig['cloudUpdate'] && sensorUpdate) {
 		pushAWS(addr, dev['temperature'], dev['humidity'], function(shadow, err) {
 			logstr = ' cloudUpdate ';
 			if (err)
@@ -151,7 +283,7 @@ function processSensorData(type, addr, data) {
 				return;
 		});
 	}
-	if (gConfig['localDBUpdate']) {
+	if (gConfig['localDBUpdate'] && sensorUpdate) {
 		pushLocalDB(addr, dev['temperature'], dev['humidity'], function(err) {
 			logstr = ' localDBUpdate';
 			if (err)
@@ -160,17 +292,26 @@ function processSensorData(type, addr, data) {
 				logstr += 'success';
 		});
 	}
-	console.log('\t' + dev['symbol'], addr + ' RSSI:' + dev['rssi'], 'temperature',
-		    dev['temperature'], 'C humidity', dev['humidity'], '%' + logstr);
-	doNotification(dev);
+	if (sensorUpdate) {
+		console.log('\t', addr + ' RSSI:' + dev['rssi'], sensorMsg + logstr);
+		doNotification(dev);
+	}
 }
 
 function sendNotification(dev) {
 	// Send notification
 	var addr = dev['peripheral'].address;
-	var subject = addr + ' needs your attention';
-	var body = 'Humidity: ' + dev['humidity'] + ' %\nTemperature: ' +
-		dev['temperature'] + ' \u00B0C\n';
+	var subject;
+	var body;
+
+	if (dev['type'] == TYPE_DIAPERSENS) {
+		subject = 'DiaperSens ' + addr + ' needs your attention';
+		body = 'Humidity: ' + dev['humidity'] + ' %\nTemperature: ' +
+			dev['temperature'] + ' \u00B0C\n';
+	} else if (dev['type'] == TYPE_FALLSENS) {
+		subject = 'FallSens ' + addr + ' needs your attention';
+		body = 'Fall detected for user ' + addr;
+	}
 
 	if (!gConfig['smsNotification'])
 		return;
@@ -376,6 +517,11 @@ function simulate() {
 	}, 5000);
 }
 
+
+// Program starts here
+if ((process.argv.length > 2) && (process.argv[2].toLowerCase() == 'calibrate'))
+	gCalibrate = true;
+
 noble.on('stateChange', function(state) {
 	gState = state;
 	if (state === 'poweredOn') {
@@ -386,7 +532,7 @@ noble.on('stateChange', function(state) {
 });
 
 noble.on('discover', function(peripheral) {
-	if (peripheral.advertisement.localName == "CFX_DIAPER" || peripheral.advertisement.localName == "XuXuKou") {
+	if (peripheral.advertisement.localName == "CFX_FALLSENS" || peripheral.advertisement.localName == "XuXuKou") {
 		var addr = peripheral.address;
 		var now = (new Date()).getTime();
 
@@ -423,19 +569,16 @@ noble.on('discover', function(peripheral) {
 					// subscribe indicate
 					temperatureMeasurementCharacteristic.subscribe(function(err) {
 						temperatureMeasurementCharacteristic.on('data', function(data, isNotification) {
-							var type;
 							switch (temperatureMeasurementCharacteristic.uuid) {
 							case '2a1c':
-								type = 'CFX';
-								gDevices[addr]['symbol'] = 'C';
+								gDevices[addr]['type'] = TYPE_FALLSENS;
 								break;
 							case '6e400003b5a3f393e0a9e50e24dcca9e':
 							default:
-								type = 'XuXuKou';
-								gDevices[addr]['symbol'] = 'X';
+								gDevices[addr]['type'] = TYPE_DIAPERSENS;
 								break;
 							}
-							processSensorData(type, addr, data);
+							processSensorData(addr, data);
 						});
 					});
 				});
