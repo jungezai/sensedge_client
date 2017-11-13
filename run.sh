@@ -43,5 +43,9 @@ else
 	if [ $(uname -s) = "Linux" ]; then
 		sudo hciconfig hci0 reset
 	fi
-	node ./sensedge.js
+	if [ "$1" = "calibrate" ]; then
+		node ./sensedge.js calibrate
+	else
+		node ./sensedge.js
+	fi
 fi

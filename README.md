@@ -1,8 +1,8 @@
 
-DiaperSens
-==========
+SensEdge
+========
 
-This repo is for ElderSens Inc's DiaperSens Project.
+This repo is for ElderSens Inc's SensEdge Project.
 
 ###Build on MacOS
 
@@ -23,6 +23,10 @@ https://developer.apple.com/xcode/downloads/
 
 ###Build on Raspberry Pi
 `./run.sh install`
+
+###FallSens Calibration
+`./run.sh calibration`
+When it's finished, append the generated line to calibrationTable in sensedge.js.
 
 ###Run
 `./run.sh`

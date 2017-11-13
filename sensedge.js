@@ -220,12 +220,16 @@ function processFallSens(addr, dev, data) {
 			    ', Y =', (GRAVITY - dev['calib_axis'][1] / dev['nsample']).toFixed(4),
 			    ', Z =', (0 - dev['calib_axis'][2] / dev['nsample']).toFixed(4));
 		if (dev['nsample'] == CALIBRATE_COUNT) {
-			console.log('Calibration Finished');
+			console.log('Calibration Finished. Append below line to calibrationTable:');
+			console.log("'" + addr + "' : [",
+				    (0 - dev['calib_axis'][0] / dev['nsample']).toFixed(4) + ", ",
+				    (GRAVITY - dev['calib_axis'][1] / dev['nsample']).toFixed(4) + ", ",
+				    (0 - dev['calib_axis'][2] / dev['nsample']).toFixed(4), "],");
 			disconnect(function() {
 				process.exit(0);
 			});
 		}
-		return true;
+		return false;
 	}
 	// Fall Detection Path
 	var now = new Date().getTime();
@@ -264,7 +268,7 @@ function processSensorData(addr, data) {
 	if (dev['type'] == TYPE_DIAPERSENS) {
 		processDiaperSens(addr, dev, data);
 		sensorUpdate = true;
-		sensorMsg = 'temperature ' + dev['temperature'] + ' C humidity' + dev['humidity'] + ' %';
+		sensorMsg = 'temperature ' + dev['temperature'] + ' C humidity ' + dev['humidity'] + ' %';
 	} else if (dev['type'] == TYPE_FALLSENS) {
 		sensorUpdate = processFallSens(addr, dev, data);
 		sensorMsg = ', Fall detected: ' + (dev['humidity'] == 0 ? "No" : "Yes");
