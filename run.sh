@@ -19,8 +19,8 @@ if [ "$1" = "install" ]; then
 				curl -sL https://deb.nodesource.com/setup_8.x | sudo -E bash -
 			fi
 			sudo apt-get update
-			sudo apt install nodejs
-			sudo apt install mosquitto mosquitto-clients
+			sudo apt -y install nodejs
+			sudo apt -y install mosquitto mosquitto-clients
 			npm install
 			# patch noble with bluez hci workaround
 			rm -rf node_modules/bluetooth-hci-socket
