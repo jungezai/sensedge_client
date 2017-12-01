@@ -61,7 +61,7 @@ var gConfig = { 'bootNotification': {
 var gDevices = {};
 var gResetting = false;
 var gState;
-var gCalibrate = false;
+var gCalibrate = true;
 var gCalibrateDevice = null;
 
 // FallSens device Calibration Table
@@ -94,6 +94,8 @@ function Device(peripheral) {
 	this.notified		= false;
 	this.connecting		= false;
 	this.tsconn		= (new Date()).getTime();
+        //
+	this.TXPower		= peripheral.advertisement.txPowerLevel;
 }
 
 function doNotification(dev) {
@@ -191,7 +193,10 @@ function processDiaperSens(addr, dev, data) {
 function processFallSens(addr, dev, data) {
 	var entry = {};
 	var fallUpdate = false;
-
+	var rssi;
+	var txp;
+	var dis;
+	var count;
 	entry['axis'] = [];
 	// data format: flag (1) X Y Z (each 4, IEEE 11073 float LE)
 	//console.log('buf ' + data.toString('hex'));
@@ -216,10 +221,25 @@ function processFallSens(addr, dev, data) {
 		for (var i = 0; i < 3; i++) {
 			dev['calib_axis'][i] += entry['axis'][i];
 		}
+
+                rssi = dev['rssi'];
+		txp = dev['TXPower'];
+		dis = processDistance(rssi, txp);
+                
+			
+			pushRouter(addr, 0, 0, rssi, txp, function(err){
+			if(err) console.log('pushAWS err-----------');
+			});
+                count = 0;
+		
 		console.log('FallSens', addr, 'calibrating', dev['nsample'],
-			    ': X =', (0 - dev['calib_axis'][0] / dev['nsample']).toFixed(4),
-			    ', Y =', (GRAVITY - dev['calib_axis'][1] / dev['nsample']).toFixed(4),
-			    ', Z =', (0 - dev['calib_axis'][2] / dev['nsample']).toFixed(4));
+			   // ': X =', (0 - dev['calib_axis'][0] / dev['nsample']).toFixed(4),
+			   // ', Y =', (GRAVITY - dev['calib_axis'][1] / dev['nsample']).toFixed(4),
+			   // ', Z =', (0 - dev['calib_axis'][2] / dev['nsample']).toFixed(4)
+			    ',rssi',rssi,
+			    ',TXPower',txp,
+			    ',distance',dis
+				);
 		if (dev['nsample'] == CALIBRATE_COUNT) {
 			console.log('Calibration Finished. Append below line to calibrationTable:');
 			console.log("'" + addr + "' : [",
@@ -260,6 +280,16 @@ function processFallSens(addr, dev, data) {
 	}
 
 	return fallUpdate;
+}
+
+function processDistance(rssi, txpower){
+	if(rssi == 0) return -1;
+	var A = 65;
+	var n = 3.0;
+	var iRssi = Math.abs(rssi);
+	var power = (iRssi-A)/(10*n);
+	return (Math.pow(10,power)).toFixed(4);
+
 }
 
 function processSensorData(addr, data) {
@@ -445,15 +475,47 @@ function hciReset()
 	});
 }
 
+
+function pushRouter(addr, vt, vh, rssi, txpower, callback){
+	var util = require('util');
+	var os = require('os');
+	var spawn = require('child_process').spawn;
+	var execFile = require('child_process').execFile;
+	var mosqparam = [
+		//'--cafile', 'certs/rootCA.pem',
+		//'--cert', 'certs/keys/certificate.pem',
+		//'--key', 'certs/keys/private.key',
+		'-h', '192.168.3.225',
+		'-p', '8883'
+	];
+
+	var logDate = new Date();
+	var hostname = os.hostname();
+	var postData = {
+		datetime: logDate.toISOString(),
+		HostName: hostname,
+		temperature: parseFloat(vt),
+		humidity: parseFloat(vh),
+		Rssi: rssi,
+		TXPower: txpower
+	};
+	console.log("pushRouter--", postData);
+	execFile('mosquitto_pub', mosqparam.concat('-t', 'fall-locate/Sensor-' + addr, '-m', JSON.stringify(postData)),
+		function(err, stdout, stderr){
+		callback(false, err);
+	});
+
+}
+
 function pushAWS(addr, vt, vh, callback) {
 	var util = require('util');
 	var spawn = require('child_process').spawn;
 	var execFile = require('child_process').execFile;
 	var mosqparam = [
-		'--cafile', 'certs/rootCA.pem',
-		'--cert', 'certs/keys/certificate.pem',
-		'--key', 'certs/keys/private.key',
-		'-h', 'a7dsuf6iddqdg.iot.us-west-2.amazonaws.com',
+		//'--cafile', 'certs/rootCA.pem',
+		//'--cert', 'certs/keys/certificate.pem',
+		//'--key', 'certs/keys/private.key',
+		'-h', '192.168.3.225',//'a7dsuf6iddqdg.iot.us-west-2.amazonaws.com',
 		'-p', '8883'
 	];
 	var logDate = new Date();
@@ -462,14 +524,15 @@ function pushAWS(addr, vt, vh, callback) {
 		temperature: parseFloat(vt),
 		humidity: parseFloat(vh)
 	};
-	console.log("pushAWS", postData);
+	console.log("pushAWS---", postData);
 	// publish to main data queue (for DynamoDB)
-	execFile('mosquitto_pub', mosqparam.concat('-t', 'temp-humidity/Sensor-' + addr, '-m', JSON.stringify(postData)),
+	execFile('mosquitto_pub', mosqparam.concat('-t', 'sensor'/*'temp-humidity/Sensor-' + addr*/, '-m', JSON.stringify(postData)),
 		 function(err, stdout, stderr) {
 			// published
 			callback(false, err);
 	});
 	// publish to device shadow
+/*
 	var shadowPayload = {
 		state: {
 			desired: {
@@ -479,11 +542,12 @@ function pushAWS(addr, vt, vh, callback) {
 			}
 		}
 	};
-	execFile('mosquitto_pub', mosqparam.concat('-t','$aws/things/Sensor-' + addr + '/shadow/update', '-m',
+	execFile('mosquitto_pub', mosqparam.concat('-t','$aws/things/Sensor-' + addr + shadow/update', '-m',
 		 JSON.stringify(shadowPayload)), function(err, stdout, stderr) {
 			// shadow update done
 			callback(true, err);
 	});
+*/
 }
 
 function pushLocalDB(addr, vt, vh, callback) {
@@ -545,7 +609,7 @@ noble.on('stateChange', function(state) {
 });
 
 noble.on('discover', function(peripheral) {
-	if (peripheral.advertisement.localName == "CFX_FALLSENS" ||
+	if (peripheral.advertisement.localName == "CFX_FALLS" ||
 	    (peripheral.advertisement.localName == "XuXuKou" && !gCalibrate)) {
 		var addr = peripheral.address;
 		var now = (new Date()).getTime();
