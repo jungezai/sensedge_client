@@ -225,13 +225,12 @@ function processFallSens(addr, dev, data) {
                 rssi = dev['rssi'];
 		txp = dev['TXPower'];
 		dis = processDistance(rssi, txp);
-                
-			
+
 			pushRouter(addr, 0, 0, rssi, txp, function(err){
 			if(err) console.log('pushAWS err-----------');
 			});
                 count = 0;
-		
+
 		console.log('FallSens', addr, 'calibrating', dev['nsample'],
 			   // ': X =', (0 - dev['calib_axis'][0] / dev['nsample']).toFixed(4),
 			   // ', Y =', (GRAVITY - dev['calib_axis'][1] / dev['nsample']).toFixed(4),
@@ -278,7 +277,6 @@ function processFallSens(addr, dev, data) {
 			fallUpdate = true;
 		}
 	}
-
 	return fallUpdate;
 }
 
@@ -476,6 +474,8 @@ function hciReset()
 }
 
 
+var count = 0;  //计数
+var sumrssi = 0;//rssi之和
 function pushRouter(addr, vt, vh, rssi, txpower, callback){
 	var util = require('util');
 	var os = require('os');
@@ -489,21 +489,30 @@ function pushRouter(addr, vt, vh, rssi, txpower, callback){
 		'-p', '8883'
 	];
 
+	count++;
+        sumrssi+=rssi;
+//	console.log('count'+count,'sumrssi'+sumrssi);
+	if(count>29){
 	var logDate = new Date();
-	var hostname = os.hostname();
+	var distance = processDistance(sumrssi/count, txpower);
 	var postData = {
 		datetime: logDate.toISOString(),
-		HostName: hostname,
-		temperature: parseFloat(vt),
-		humidity: parseFloat(vh),
+		HostName: os.hostname(),
+//		temperature: parseFloat(vt),
+//		humidity: parseFloat(vh),
 		Rssi: rssi,
-		TXPower: txpower
+		TXPower: txpower,
+		count: count,
+		distance: parseFloat(distance)
 	};
 	console.log("pushRouter--", postData);
 	execFile('mosquitto_pub', mosqparam.concat('-t', 'fall-locate/Sensor-' + addr, '-m', JSON.stringify(postData)),
 		function(err, stdout, stderr){
 		callback(false, err);
 	});
+	sumrssi = 0;
+	count = 0;
+	}
 
 }
 
@@ -512,10 +521,10 @@ function pushAWS(addr, vt, vh, callback) {
 	var spawn = require('child_process').spawn;
 	var execFile = require('child_process').execFile;
 	var mosqparam = [
-		//'--cafile', 'certs/rootCA.pem',
-		//'--cert', 'certs/keys/certificate.pem',
-		//'--key', 'certs/keys/private.key',
-		'-h', '192.168.3.225',//'a7dsuf6iddqdg.iot.us-west-2.amazonaws.com',
+		'--cafile', 'certs/rootCA.pem',
+		'--cert', 'certs/keys/certificate.pem',
+		'--key', 'certs/keys/private.key',
+		'-h', 'a7dsuf6iddqdg.iot.us-west-2.amazonaws.com',
 		'-p', '8883'
 	];
 	var logDate = new Date();
@@ -526,13 +535,13 @@ function pushAWS(addr, vt, vh, callback) {
 	};
 	console.log("pushAWS---", postData);
 	// publish to main data queue (for DynamoDB)
-	execFile('mosquitto_pub', mosqparam.concat('-t', 'sensor'/*'temp-humidity/Sensor-' + addr*/, '-m', JSON.stringify(postData)),
+	execFile('mosquitto_pub', mosqparam.concat('-t', 'temp-humidity/Sensor-' + addr, '-m', JSON.stringify(postData)),
 		 function(err, stdout, stderr) {
 			// published
 			callback(false, err);
 	});
 	// publish to device shadow
-/*
+
 	var shadowPayload = {
 		state: {
 			desired: {
@@ -542,13 +551,16 @@ function pushAWS(addr, vt, vh, callback) {
 			}
 		}
 	};
-	execFile('mosquitto_pub', mosqparam.concat('-t','$aws/things/Sensor-' + addr + shadow/update', '-m',
+	execFile('mosquitto_pub', mosqparam.concat('-t','$aws/things/Sensor-' + addr +'shadow/update', '-m',
 		 JSON.stringify(shadowPayload)), function(err, stdout, stderr) {
 			// shadow update done
 			callback(true, err);
 	});
-*/
+
 }
+
+
+
 
 function pushLocalDB(addr, vt, vh, callback) {
 	var con = mysql.createConnection({
