@@ -5,6 +5,13 @@ var ip = require('ip');
 var mqsh = require('./mqpubsub.js');
 var mysql = require('mysql');
 
+
+//mosq
+var util = require('util');
+var exec_mosq = require('child_process').exec;
+var mosq_comand = 'mosquitto -v -p 8883';
+var mosq_sub_comand = 'mosquitto_sub -t fall-locate/Sensor-fe:52:df:aa:1c:6a -p 8883 ';
+
 // Constant
 const TYPE_DIAPERSENS =	1
 const TYPE_FALLSENS   = 2
@@ -98,6 +105,53 @@ function Device(peripheral) {
 	this.TXPower		= peripheral.advertisement.txPowerLevel;
 }
 
+var hostip;
+var mosq_param = [
+	'-h', hostip,
+	'-p', '8883'
+	];
+var hostcmd = 'nmblookup raspberrypi';
+
+try{
+	exec_mosq(hostcmd, function(error, stdout, stderr){
+	if(error){
+	console.error('hostcmd',stderr);
+	throw error;
+	}
+	console.log('stdout--host', stdout);
+	stdout = stdout.split(' ');
+	hostip = stdout[0];
+	});
+
+
+	if(os.hostname == 'raspberrypi'){
+	exec_mosq(mosq_comand, function(error, stdout, stderr){
+	if(error){
+	console.error('mosq stderr', stderr);
+	throw error;
+	}
+	console.log('stdout', stdout);
+	});
+
+	 exec_mosq(mosq_sub_comand.concat('-h', hostip,'>trying.log'), function(error, stdout, stderr){
+         if(error){
+         console.error('mosq sub stderr', stderr);
+         throw error;
+         }
+         console.log('stdout', stdout);
+         });
+	}
+		}catch(e){
+	console.log('readdirSync'+e);
+}
+
+
+
+
+
+
+
+
 function doNotification(dev) {
 	if (gConfig['useAlgorithm']) {
 		algo_detection(dev);
@@ -190,7 +244,7 @@ function processDiaperSens(addr, dev, data) {
 	}
 }
 
-function processFallSens(addr, dev, data) {
+function processFallSens(addr, dev, data) {//data
 	var entry = {};
 	var fallUpdate = false;
 	var rssi;
@@ -226,7 +280,7 @@ function processFallSens(addr, dev, data) {
 		txp = dev['TXPower'];
 		dis = processDistance(rssi, txp);
 
-			pushRouter(addr, 0, 0, rssi, txp, function(err){
+		pushRouter(addr, 0, 0, rssi, txp, function(err){
 			if(err) console.log('pushAWS err-----------');
 			});
                 count = 0;
@@ -238,7 +292,7 @@ function processFallSens(addr, dev, data) {
 			    ',rssi',rssi,
 			    ',TXPower',txp,
 			    ',distance',dis
-				);
+		);
 		if (dev['nsample'] == CALIBRATE_COUNT) {
 			console.log('Calibration Finished. Append below line to calibrationTable:');
 			console.log("'" + addr + "' : [",
@@ -485,16 +539,17 @@ function pushRouter(addr, vt, vh, rssi, txpower, callback){
 		//'--cafile', 'certs/rootCA.pem',
 		//'--cert', 'certs/keys/certificate.pem',
 		//'--key', 'certs/keys/private.key',
-		'-h', '192.168.3.225',
+		'-h', hostip,
 		'-p', '8883'
 	];
-
+         var logDate = new Date();
+	var distance = processDistance(sumrssi/count, txpower);
 	count++;
         sumrssi+=rssi;
-//	console.log('count'+count,'sumrssi'+sumrssi);
+	console.log('count'+count,'sumrssi'+sumrssi,'hostname'+os.hostname,'distance'+distance);
 	if(count>29){
-	var logDate = new Date();
-	var distance = processDistance(sumrssi/count, txpower);
+//	var logDate = new Date();
+//	var distance = processDistance(sumrssi/count, txpower);
 	var postData = {
 		datetime: logDate.toISOString(),
 		HostName: os.hostname(),
@@ -635,6 +690,17 @@ noble.on('discover', function(peripheral) {
 			if (addr != gCalibrateDevice)
 				return;
 		}
+		var Rssi = peripheral.rssi;
+		var TXPower = peripheral.advertisement.txPowerLevel;
+		console.log("fallsens",addr,"rssi",Rssi,"txp",TXPower);
+         	pushRouter(addr, 0, 0, Rssi, TXPower, function(err){
+		if(err ) console.log('pushRouter err--');
+		});
+
+		return;
+
+
+
 
 		// Avoid duplicated connection, parallel connection and if we haven't heard a sensor
 		// for 20s, we will reconnect with it (when adv is heard).
@@ -651,6 +717,7 @@ noble.on('discover', function(peripheral) {
 		if (peripheral.advertisement.localName == "XuXuKou") {
 			if (!gDevices[addr]['firstadv'])
 				gDevices[addr]['firstadv'] = now;
+
 			if (now - gDevices[addr]['firstadv'] < 10 * 1000)
 				return;
 		}
@@ -695,7 +762,7 @@ noble.on('discover', function(peripheral) {
 					});
 				});
 			});
-			// handle disconnect event
+			// handle disconnect even
 			peripheral.once('disconnect', function() {
 				var address = peripheral.address;
 				if (gDevices[address] == undefined)
